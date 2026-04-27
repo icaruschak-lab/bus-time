@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>荔枝角往華基倉 - 巴士時間表</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif;
+            background: #f0f4f8;
+            color: #333;
+            padding: 12px;
+        }
+        .section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            padding: 15px;
+            max-width: 600px;
+            margin: auto;
+        }
+        .header-wrap {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-left: 8px solid #1a3c6d;
+            padding-left: 12px;
+        }
+        h2 { 
+            font-size: 1.5rem; 
+            color: #1a3c6d; 
+        }
+        .btn-refresh {
+            background: #2c5282; color: white; border: none;
+            padding: 10px 20px; border-radius: 8px;
+            cursor: pointer; font-size: 1rem;
+            font-weight: bold;
+        }
+        .btn-refresh:active { background: #1a3c6d; transform: scale(0.95); }
+        
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th { 
+            background: #2c5282; color: white; 
+            padding: 15px 5px; 
+            font-weight: bold; 
+            font-size: 1.1rem;
+        }
+        td { border: 1px solid #e2e8f0; padding: 18px 5px; text-align: center; }
+        
+        .route-cell { 
+            font-weight: 900; 
+            color: #c53030; 
+            font-size: 1.8rem;
+            line-height: 1.2;
+        }
+        .dest-cell { 
+            font-size: 1rem;
+            color: #555; 
+            margin-top: 4px;
+        }
+        
+        /* 全場最快二車：紅色閃爍 */
+        .eta-top-two {
+            color: #e53e3e;
+            font-weight: 900;
+            font-size: 1.6rem;
+            animation: blink 1.2s infinite;
+        }
+        .eta-normal { 
+            color: #2d3748; 
+            font-weight: bold; 
+            font-size: 1.5rem;
+        }
+        
+        .unit { font-size: 0.9rem; margin-left: 2px; color: #718096; }
+        .update-time { text-align: right; font-size: 1rem; color: #718096; margin-top: 15px; }
+        
+        @keyframes blink { 50% { opacity: 0.7; } }
+    </style>
+</head>
+<body>
+
+    <div class="section">
+        <div class="header-wrap">
+            <h2>荔枝角往華基倉 - 巴士時間表</h2>
+            <button class="btn-refresh" onclick="updateData()">更新</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 30%;">路線</th>
+                    <th style="width: 23%;">下一班</th>
+                    <th style="width: 23%;">之後</th>
+                    <th style="width: 24%;">再之後</th>
+                </tr>
+            </thead>
+            <tbody id="tbodyLCK">
+                <tr><td colspan="4" style="padding:40px; font-size:1.2rem; color:#a0aec0;">校準數據中...</td></tr>
+            </tbody>
+        </table>
+        <div id="updTime" class="update-time"></div>
+    </div>
+
+    <script>
+        // 加密數據：31B(10), 32(12), 36B(16), 35A(17)
+        const _k = "W3sicm91dGUiOiIzMUIiLCJzZXEiOjEwLCJkZXN0Ijoi55m石籬In0seyJyb3V0ZSI6IjMyIiwic2VxIjoxMiwiZGVzdCI6IueZp+i6sSJ9LHsicm91dGUiOiIzNkIiLCJzZXEiOjE2LCJkZXN0Ijoi5Yid5pyo5qi5In0seyJyb3V0ZSI6IjM1QSIsInNlcSI6MTcsImRlc3QiOiLpmYnoqp8ifV0=";
+
+        function _d(s) {
+            try {
+                return JSON.parse(decodeURIComponent(escape(window.atob(s))));
+            } catch (e) {
+                return [
+                    { route: '31B', seq: 10, dest: '石籬' },
+                    { route: '32',   seq: 12, dest: '石蔭' },
+                    { route: '36B',  seq: 16, dest: '梨木樹' },
+                    { route: '35A',  seq: 17, dest: '安蔭' }
+                ];
+            }
+        }
+
+        const BUS_CONFIG = _d(_k);
+
+        async function updateData() {
+            const tbody = document.getElementById('tbodyLCK');
+            const upd = document.getElementById('updTime');
+            const btn = document.querySelector('.btn-refresh');
+
+            btn.innerText = "稍等";
+            btn.disabled = true;
+
+            try {
+                const promises = BUS_CONFIG.map(c => 
+                    fetch(`https://data.etabus.gov.hk/v1/transport/kmb/route-eta/${c.route}/1`)
+                    .then(res => res.json())
+                    .then(json => {
+                        const etas = (json.data || []).filter(item => item.dir === 'I' && item.seq === c.seq);
+                        return etas.map(e => ({
+                            route: c.route,
+                            dest: c.dest,
+                            eta_seq: e.eta_seq,
+                            // 延續 -1 分鐘修正邏輯
+                            diff: e.eta ? Math.round((new Date(e.eta) - new Date()) / 60000) - 1 : 999,
+                            eta_raw: e.eta
+                        }));
+                    })
+                );
+
+                const allResults = await Promise.all(promises);
+                
+                // 全域排序找出最快兩班
+                const flatEtas = allResults.flat().filter(e => e.eta_raw).sort((a, b) => a.diff - b.diff);
+                const topTwoKeys = flatEtas.slice(0, 2).map(e => `${e.route}_${e.eta_seq}`);
+
+                let rowsHtml = '';
+                allResults.forEach(resGroup => {
+                    if (resGroup.length === 0) return;
+                    const routeName = resGroup[0].route;
+                    const destName = resGroup[0].dest;
+                    
+                    let cells = [];
+                    for (let i = 1; i <= 3; i++) {
+                        const bus = resGroup.find(e => e.eta_seq === i);
+                        if (bus) {
+                            const isTopTwo = topTwoKeys.includes(`${bus.route}_${bus.eta_seq}`);
+                            const displayTime = bus.diff <= 0 ? '到站' : bus.diff + '<span class="unit">分</span>';
+                            const cls = isTopTwo ? 'eta-top-two' : 'eta-normal';
+                            cells.push(`<span class="${cls}">${displayTime}</span>`);
+                        } else {
+                            cells.push('<span style="color:#cbd5e0">—</span>');
+                        }
+                    }
+
+                    rowsHtml += `
+                        <tr>
+                            <td>
+                                <div class="route-cell">${routeName}</div>
+                                <div class="dest-cell">往${destName}</div>
+                            </td>
+                            <td>${cells[0]}</td>
+                            <td>${cells[1]}</td>
+                            <td>${cells[2]}</td>
+                        </tr>
+                    `;
+                });
+
+                tbody.innerHTML = rowsHtml;
+                upd.textContent = `最後更新：${new Date().toLocaleTimeString()}`;
+
+            } catch (err) {
+                upd.textContent = "讀取失敗，請點擊更新";
+            } finally {
+                btn.innerText = "更新";
+                btn.disabled = false;
+            }
+        }
+
+        updateData();
+        setInterval(updateData, 15000);
+    </script>
+</body>
+</html>
